@@ -1,0 +1,29 @@
+# ============================================================
+# docker-compose.yml — MCP Database Wrapper Service
+# ============================================================
+version: '3.8'
+
+services:
+  mcp-db-wrapper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-db-wrapper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+      - MCP_TRANSPORT=http
+    volumes:
+      # Mount configuration files so updates apply without rebuilding image
+      - ./config:/app/config:ro
+      - ./policies:/app/policies:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
