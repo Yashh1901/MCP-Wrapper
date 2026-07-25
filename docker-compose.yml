@@ -1,7 +1,6 @@
 # ============================================================
 # docker-compose.yml — MCP Database Wrapper Service
 # ============================================================
-version: '3.8'
 
 services:
   mcp-db-wrapper:
