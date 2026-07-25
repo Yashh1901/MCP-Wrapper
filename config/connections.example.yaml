@@ -1,0 +1,73 @@
+# ============================================================
+#  connections.example.yaml — Database Connection Configurations
+#
+#  Copy this file to connections.yaml to set up your connections.
+#  Each key is a "connection name" that identifies the DB.
+#  Sensitive values should use ${ENV_VAR} substitution.
+# ============================================================
+
+connections:
+
+  # ---- PostgreSQL Example ----
+  my_postgres:
+    type: postgres
+    host: "${POSTGRES_HOST}"
+    port: 5432
+    database: "${POSTGRES_DB}"
+    user: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    ssl: false
+    # Optional: connection pool settings
+    pool_min: 1
+    pool_max: 10
+    description: "Main PostgreSQL production database"
+
+  # ---- MySQL Example ----
+  my_mysql:
+    type: mysql
+    host: "${MYSQL_HOST}"
+    port: 3306
+    database: "${MYSQL_DB}"
+    user: "${MYSQL_USER}"
+    password: "${MYSQL_PASSWORD}"
+    ssl: false
+    description: "Legacy MySQL database"
+
+  # ---- MongoDB Example ----
+  my_mongo:
+    type: mongodb
+    url: "${MONGODB_URL}"
+    database: "${MONGODB_DB}"
+    description: "MongoDB document store"
+
+  # ---- SQLite Example ----
+  my_sqlite:
+    type: sqlite
+    path: "${SQLITE_PATH}"
+    description: "Local SQLite database"
+
+  # ---- Redis Example ----
+  my_redis:
+    type: redis
+    url: "${REDIS_URL}"
+    description: "Redis cache/store (key introspection)"
+
+  # ---- MSSQL Example ----
+  my_mssql:
+    type: mssql
+    host: "localhost"
+    port: 1433
+    database: "mydb"
+    user: "${MSSQL_USER}"
+    password: "${MSSQL_PASSWORD}"
+    driver: "ODBC Driver 17 for SQL Server"
+    description: "Microsoft SQL Server"
+
+  # ---- Supabase Example ----
+  my_supabase:
+    type: supabase
+    url: "${SUPABASE_URL}"
+    key: "${SUPABASE_KEY}"
+    # Supabase is backed by Postgres; provide db_url for direct schema introspection
+    db_url: "${SUPABASE_DB_URL}"
+    description: "Supabase project (PostgreSQL backend)"

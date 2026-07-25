@@ -41,10 +41,14 @@ def _interpolate_env(value: Any) -> Any:
 
 
 def _load_yaml(path: str | Path) -> dict:
-    """Load a YAML file and interpolate env variables."""
+    """Load a YAML file and interpolate env variables. Falls back to .example.yaml if missing."""
     p = Path(path)
     if not p.exists():
-        return {}
+        example_p = p.with_name(p.stem + ".example" + p.suffix)
+        if example_p.exists():
+            p = example_p
+        else:
+            return {}
     with p.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return _interpolate_env(data)

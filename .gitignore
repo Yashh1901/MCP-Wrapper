@@ -20,6 +20,12 @@ ENV/
 .env
 *.env.local
 
+# Database & Policy Configs — NEVER COMMIT
+config/connections.yaml
+policies/policies.yaml
+!config/connections.example.yaml
+!policies/policies.example.yaml
+
 # Test artifacts
 .pytest_cache/
 .coverage
