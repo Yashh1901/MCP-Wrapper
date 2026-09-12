@@ -1,7 +1,8 @@
 """
 mcp_db_wrapper — Universal MCP Database Wrapper
 """
-from importlib.metadata import version, PackageNotFoundError
+
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("mcp-db-wrapper")

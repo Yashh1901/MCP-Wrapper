@@ -1,10 +1,10 @@
 """
 tests/test_sqlite_connector.py — Integration test using real SQLite (no external DB needed)
 """
+
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from pathlib import Path
 
 import aiosqlite
@@ -14,10 +14,10 @@ import pytest_asyncio
 from mcp_db_wrapper.connectors.sqlite import SQLiteConnector
 from mcp_db_wrapper.core.config import ConnectionConfig
 
-
 # ------------------------------------------------------------------ #
 #  Fixtures
 # ------------------------------------------------------------------ #
+
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> str:
@@ -77,6 +77,7 @@ async def connector(db_path: str) -> SQLiteConnector:
 # ------------------------------------------------------------------ #
 #  Tests
 # ------------------------------------------------------------------ #
+
 
 @pytest.mark.asyncio
 async def test_list_tables(connector: SQLiteConnector) -> None:

@@ -1,9 +1,11 @@
 """
 tests/test_security.py — Unit tests for SQL security validation
 """
+
 from __future__ import annotations
 
 import pytest
+
 from mcp_db_wrapper.core.security import QuerySecurityError, QueryValidator
 
 
@@ -15,6 +17,7 @@ def validator() -> QueryValidator:
 # ------------------------------------------------------------------ #
 #  Valid SELECT queries
 # ------------------------------------------------------------------ #
+
 
 def test_simple_select(validator: QueryValidator) -> None:
     sql = validator.validate("SELECT id, name FROM users")
@@ -57,6 +60,7 @@ def test_trailing_semicolon_stripped(validator: QueryValidator) -> None:
 # ------------------------------------------------------------------ #
 #  Invalid / dangerous queries
 # ------------------------------------------------------------------ #
+
 
 def test_empty_query(validator: QueryValidator) -> None:
     with pytest.raises(QuerySecurityError):

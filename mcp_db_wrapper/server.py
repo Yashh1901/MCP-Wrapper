@@ -16,17 +16,18 @@ MCP Tools:
   - get_policy_summary      → Show active policy for a connection
   - health_check            → Check all connection health
 """
+
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 import structlog
-from mcp import tool
 from mcp.server import Server
-from mcp.server.models import InitializationOptions
 from mcp.types import TextContent, Tool
 
+from mcp_db_wrapper.core.audit import AuditLogger
 from mcp_db_wrapper.core.config import load_settings
 from mcp_db_wrapper.core.policy import PolicyEngine, PolicyViolation
 from mcp_db_wrapper.core.registry import ConnectorRegistry
@@ -36,10 +37,13 @@ logger = structlog.get_logger(__name__)
 
 # ------------------------------------------------------------------ #
 #  Global state (initialized in create_server())
+#  WARNING: Module-level singletons — only one server instance per process.
+#  For multi-instance support, refactor to a ServerContext class.
 # ------------------------------------------------------------------ #
 _registry: ConnectorRegistry | None = None
 _policy: PolicyEngine | None = None
 _introspector: SchemaIntrospector | None = None
+_audit: AuditLogger | None = None
 
 
 def _get_introspector() -> SchemaIntrospector:
@@ -74,6 +78,7 @@ def _err(message: str) -> list[TextContent]:
 #  Server factory
 # ------------------------------------------------------------------ #
 
+
 async def create_server() -> Server:
     """
     Create and initialize the MCP server with all tools registered.
@@ -81,13 +86,14 @@ async def create_server() -> Server:
     Returns:
         Configured MCP Server instance.
     """
-    global _registry, _policy, _introspector
+    global _registry, _policy, _introspector, _audit
 
     settings = load_settings()
     _policy = PolicyEngine()
     _registry = ConnectorRegistry()
     await _registry.initialize(eager=False)  # lazy connect
     _introspector = SchemaIntrospector(_registry, _policy)
+    _audit = AuditLogger(settings.audit_log_path)
 
     server = Server(
         name=settings.server_name,
@@ -103,7 +109,18 @@ async def create_server() -> Server:
 
     @server.call_tool()
     async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        return await _dispatch_tool(name, arguments)
+        connection = arguments.get("connection")
+        try:
+            response = await asyncio.wait_for(
+                _dispatch_tool(name, arguments), timeout=settings.request_timeout_seconds
+            )
+            outcome = "error" if '"error"' in response[0].text else "success"
+        except TimeoutError:
+            response = _err(f"Error executing '{name}': request timed out")
+            outcome = "timeout"
+        if _audit:
+            _audit.record(tool=name, connection=connection, outcome=outcome)
+        return response
 
     logger.info(
         "mcp_server_created",
@@ -117,6 +134,7 @@ async def create_server() -> Server:
 # ------------------------------------------------------------------ #
 #  Tool definitions (metadata)
 # ------------------------------------------------------------------ #
+
 
 def _get_tool_definitions() -> list[Tool]:
     return [
@@ -357,6 +375,7 @@ def _get_tool_definitions() -> list[Tool]:
 #  Tool dispatcher
 # ------------------------------------------------------------------ #
 
+
 async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
     """Route tool calls to the appropriate handler."""
     introspector = _get_introspector()
@@ -365,7 +384,6 @@ async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
 
     try:
         match name:
-
             case "list_connections":
                 data = registry.list_connections()
                 return _ok({"connections": data, "total": len(data)})
@@ -376,9 +394,7 @@ async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
                 return _ok(result)
 
             case "describe_table":
-                result = await introspector.describe_table(
-                    args["connection"], args["table"]
-                )
+                result = await introspector.describe_table(args["connection"], args["table"])
                 return _ok(result)
 
             case "get_schema_map":
@@ -406,9 +422,7 @@ async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
 
                 connector = await registry.get(conn_name)
                 if not isinstance(connector, MongoDBConnector):
-                    return _err(
-                        f"Connection '{conn_name}' is not a MongoDB connection."
-                    )
+                    return _err(f"Connection '{conn_name}' is not a MongoDB connection.")
                 limit = min(
                     args.get("limit", 20),
                     policy.get_row_limit(conn_name),
@@ -420,17 +434,17 @@ async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
                     limit=limit,
                 )
                 rows = policy.apply_column_masks(conn_name, args["collection"], rows)
-                return _ok({
-                    "connection": conn_name,
-                    "collection": args["collection"],
-                    "count": len(rows),
-                    "documents": rows,
-                })
+                return _ok(
+                    {
+                        "connection": conn_name,
+                        "collection": args["collection"],
+                        "count": len(rows),
+                        "documents": rows,
+                    }
+                )
 
             case "get_sample_data":
-                result = await introspector.get_sample_data(
-                    args["connection"], args["table"]
-                )
+                result = await introspector.get_sample_data(args["connection"], args["table"])
                 return _ok(result)
 
             case "get_db_stats":
@@ -455,7 +469,7 @@ async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
         logger.warning("key_error", tool=name, error=str(e))
         return _err(str(e))
     except Exception as e:
-        logger.error("tool_error", tool=name, error=str(e), exc_info=True)
+        logger.exception("tool_error", tool=name, error=str(e))
         return _err(f"Error executing '{name}': {e}")
 
 
@@ -463,8 +477,8 @@ async def _dispatch_tool(name: str, args: dict[str, Any]) -> list[TextContent]:
 #  Server shutdown helper
 # ------------------------------------------------------------------ #
 
+
 async def shutdown_server() -> None:
     """Gracefully shut down the server and disconnect all connectors."""
-    global _registry
     if _registry:
         await _registry.shutdown()

@@ -36,7 +36,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD-SHELL curl -fsS -H "Authorization: Bearer $MCP_API_KEY" http://localhost:8000/health || exit 1
 
 # Default command: Start HTTP transport server on 0.0.0.0:8000
 CMD ["mcp-db-wrapper", "serve", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"]

@@ -11,6 +11,7 @@ Security model:
   - Max rows per query enforcement
   - Query-level SQL validation (via query_tools.py / security.py)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,14 +28,16 @@ logger = structlog.get_logger(__name__)
 #  Data classes
 # ------------------------------------------------------------------ #
 
+
 @dataclass
 class ConnectionPolicy:
     """Resolved policy for a single database connection."""
 
     connection_name: str
-    allow_schema_introspection: bool = True
-    allow_query_execution: bool = True
-    allow_sample_data: bool = True
+    # An omitted policy is never permission to expose a database to an agent.
+    allow_schema_introspection: bool = False
+    allow_query_execution: bool = False
+    allow_sample_data: bool = False
     max_rows_per_query: int = 100
     sample_data_max_rows: int = 5
 
@@ -66,6 +69,7 @@ class PolicyViolation(Exception):
 # ------------------------------------------------------------------ #
 #  Policy Engine
 # ------------------------------------------------------------------ #
+
 
 class PolicyEngine:
     """
@@ -118,16 +122,15 @@ class PolicyEngine:
 
         policy = ConnectionPolicy(
             connection_name=connection_name,
-            allow_schema_introspection=_get("allow_schema_introspection", True),
-            allow_query_execution=_get("allow_query_execution", True),
-            allow_sample_data=_get("allow_sample_data", True),
+            allow_schema_introspection=_get("allow_schema_introspection", False),
+            allow_query_execution=_get("allow_query_execution", False),
+            allow_sample_data=_get("allow_sample_data", False),
             max_rows_per_query=int(_get("max_rows_per_query", 100)),
             sample_data_max_rows=int(_get("sample_data_max_rows", 5)),
             table_allowlist=[t.lower() for t in allowlist],
             table_blocklist=[t.lower() for t in blocklist],
             column_masks={
-                tbl.lower(): [c.lower() for c in cols]
-                for tbl, cols in col_masks.items()
+                tbl.lower(): [c.lower() for c in cols] for tbl, cols in col_masks.items()
             },
         )
 
@@ -195,9 +198,7 @@ class PolicyEngine:
     #  Data transformation helpers
     # -------------------------------------------------------------- #
 
-    def filter_tables(
-        self, connection_name: str, tables: list[str]
-    ) -> list[str]:
+    def filter_tables(self, connection_name: str, tables: list[str]) -> list[str]:
         """
         Filter a list of table names according to policy.
 
@@ -252,6 +253,14 @@ class PolicyEngine:
                     masked_row[col] = val
             result.append(masked_row)
         return result
+
+    def masked_columns(self, connection_name: str, table_names: set[str]) -> set[str]:
+        """Return the union of configured masked columns for the given tables."""
+        policy = self._get_policy(connection_name)
+        result: set[str] = set()
+        for table_name in table_names:
+            result.update(policy.column_masks.get(table_name.lower(), []))
+        return {column.lower() for column in result}
 
     def apply_schema_column_masks(
         self,

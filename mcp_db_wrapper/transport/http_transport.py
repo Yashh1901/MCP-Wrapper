@@ -15,6 +15,7 @@ Security:
   - CORS configurable
   - Optional TLS
 """
+
 from __future__ import annotations
 
 import structlog
@@ -31,9 +32,25 @@ from mcp_db_wrapper.server import create_server, shutdown_server
 logger = structlog.get_logger(__name__)
 
 
+from collections import defaultdict, deque
+from contextlib import asynccontextmanager
+from time import monotonic
+
+
 def build_app() -> FastAPI:
     """Build and return the FastAPI application."""
     settings = load_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup
+        mcp_server = await create_server()
+        app.state.mcp_server = mcp_server
+        logger.info("http_transport_started", host=settings.host, port=settings.port)
+        yield
+        # Shutdown
+        await shutdown_server()
+        logger.info("http_transport_stopped")
 
     app = FastAPI(
         title="MCP DB Wrapper",
@@ -41,16 +58,35 @@ def build_app() -> FastAPI:
         version=settings.server_version,
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
-    # CORS — allow all origins by default (tighten in production)
+    # MCP transports are normally used server-to-server.  Do not combine a
+    # wildcard origin with credentials, which is both unsafe and rejected by
+    # browsers.  Deployments that need browser access should add explicit origins.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Lightweight per-process protection for self-hosted deployments. Put a
+    # shared rate limiter at the reverse proxy when running multiple replicas.
+    request_times: dict[str, deque[float]] = defaultdict(deque)
+
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        client = request.client.host if request.client else "unknown"
+        now = monotonic()
+        window = request_times[client]
+        while window and window[0] <= now - 60:
+            window.popleft()
+        if len(window) >= settings.http_rate_limit_per_minute:
+            return JSONResponse({"detail": "Rate limit exceeded."}, status_code=429)
+        window.append(now)
+        return await call_next(request)
 
     # ----------------------------------------------------------------
     #  Auth dependency
@@ -75,22 +111,6 @@ def build_app() -> FastAPI:
             )
 
     # ----------------------------------------------------------------
-    #  Startup / Shutdown
-    # ----------------------------------------------------------------
-    _mcp_server = None
-
-    @app.on_event("startup")
-    async def _startup() -> None:
-        nonlocal _mcp_server
-        _mcp_server = await create_server()
-        logger.info("http_transport_started", host=settings.host, port=settings.port)
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        await shutdown_server()
-        logger.info("http_transport_stopped")
-
-    # ----------------------------------------------------------------
     #  Routes
     # ----------------------------------------------------------------
 
@@ -107,8 +127,8 @@ def build_app() -> FastAPI:
 
     @app.get("/health", tags=["Info"])
     async def health(_: None = Depends(_require_api_key)) -> JSONResponse:
-        from mcp_db_wrapper.core.registry import ConnectorRegistry
         from mcp_db_wrapper.core.config import load_connections
+
         # Quick health without full check
         connections = load_connections()
         return JSONResponse({"status": "ok", "connections": len(connections)})
@@ -117,27 +137,28 @@ def build_app() -> FastAPI:
     sse_transport = SseServerTransport("/messages")
 
     @app.get("/sse", tags=["MCP"])
-    async def sse_endpoint(
-        request: Request, _: None = Depends(_require_api_key)
-    ):
+    async def sse_endpoint(request: Request, _: None = Depends(_require_api_key)):
         """SSE endpoint for MCP protocol communication."""
-        assert _mcp_server is not None, "Server not initialized"
+        mcp_server = request.app.state.mcp_server
+        assert mcp_server is not None, "Server not initialized"
         async with sse_transport.connect_sse(
-            request.scope, request.receive, request._send  # type: ignore[attr-defined]
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore[attr-defined]
         ) as streams:
-            await _mcp_server.run(
+            await mcp_server.run(
                 streams[0],
                 streams[1],
-                _mcp_server.create_initialization_options(),
+                mcp_server.create_initialization_options(),
             )
 
     @app.post("/messages", tags=["MCP"])
-    async def post_message(
-        request: Request, _: None = Depends(_require_api_key)
-    ):
+    async def post_message(request: Request, _: None = Depends(_require_api_key)):
         """MCP message POST endpoint (paired with SSE)."""
         return await sse_transport.handle_post_message(
-            request.scope, request.receive, request._send  # type: ignore[attr-defined]
+            request.scope,
+            request.receive,
+            request._send,  # type: ignore[attr-defined]
         )
 
     return app

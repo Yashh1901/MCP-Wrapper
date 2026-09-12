@@ -55,3 +55,7 @@ data/
 # Logs
 *.log
 logs/
+
+graphify-out/
+.agents/
+.test-tmp/

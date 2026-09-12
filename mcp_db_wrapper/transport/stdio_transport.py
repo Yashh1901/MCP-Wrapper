@@ -4,9 +4,8 @@ transport/stdio_transport.py — stdio MCP transport
 Used for local integrations (Cursor IDE, Claude Desktop, Antigravity CLI, etc.)
 The MCP server communicates over stdin/stdout with JSON-RPC messages.
 """
-from __future__ import annotations
 
-import asyncio
+from __future__ import annotations
 
 import structlog
 from mcp.server.stdio import stdio_server

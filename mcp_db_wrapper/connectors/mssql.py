@@ -1,6 +1,7 @@
 """
 connectors/mssql.py — Microsoft SQL Server Connector (async via aioodbc)
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -54,26 +55,24 @@ class MSSQLConnector(BaseConnector):
 
     async def list_tables(self) -> list[str]:
         assert self._pool, "Not connected"
-        async with self._pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
                     SELECT TABLE_NAME
                     FROM INFORMATION_SCHEMA.TABLES
                     WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW')
                       AND TABLE_SCHEMA = 'dbo'
                     ORDER BY TABLE_NAME
                     """
-                )
-                rows = await cur.fetchall()
+            )
+            rows = await cur.fetchall()
         return [r[0] for r in rows]
 
     async def describe_table(self, table_name: str) -> TableInfo:
         assert self._pool, "Not connected"
-        async with self._pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
                     SELECT
                         c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH,
                         c.IS_NULLABLE, c.COLUMN_DEFAULT,
@@ -101,12 +100,14 @@ class MSSQLConnector(BaseConnector):
                     WHERE c.TABLE_NAME = ? AND c.TABLE_SCHEMA = 'dbo'
                     ORDER BY c.ORDINAL_POSITION
                     """,
-                    table_name, table_name, table_name,
-                )
-                col_rows = await cur.fetchall()
+                table_name,
+                table_name,
+                table_name,
+            )
+            col_rows = await cur.fetchall()
 
-                await cur.execute(
-                    """
+            await cur.execute(
+                """
                     SELECT
                         kcu.COLUMN_NAME, ccu.TABLE_NAME AS ref_table, ccu.COLUMN_NAME AS ref_col
                     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
@@ -119,17 +120,22 @@ class MSSQLConnector(BaseConnector):
                     WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
                       AND tc.TABLE_NAME = ? AND tc.TABLE_SCHEMA = 'dbo'
                     """,
-                    table_name,
-                )
-                fk_rows = await cur.fetchall()
+                table_name,
+            )
+            fk_rows = await cur.fetchall()
 
         fk_map = {r[0]: f"{r[1]}.{r[2]}" for r in fk_rows}
         columns = [
             ColumnInfo(
-                name=r[0], data_type=r[1], max_length=r[2],
-                nullable=(r[3] == "YES"), default=r[4],
-                is_primary_key=bool(r[5]), is_unique=bool(r[6]),
-                is_foreign_key=r[0] in fk_map, foreign_key_ref=fk_map.get(r[0]),
+                name=r[0],
+                data_type=r[1],
+                max_length=r[2],
+                nullable=(r[3] == "YES"),
+                default=r[4],
+                is_primary_key=bool(r[5]),
+                is_unique=bool(r[6]),
+                is_foreign_key=r[0] in fk_map,
+                foreign_key_ref=fk_map.get(r[0]),
             )
             for r in col_rows
         ]
@@ -141,10 +147,9 @@ class MSSQLConnector(BaseConnector):
 
     async def get_relationships(self) -> list[RelationshipInfo]:
         assert self._pool, "Not connected"
-        async with self._pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
                     SELECT
                         kcu.TABLE_NAME AS from_table, kcu.COLUMN_NAME AS from_col,
                         ccu.TABLE_NAME AS to_table, ccu.COLUMN_NAME AS to_col,
@@ -159,10 +164,16 @@ class MSSQLConnector(BaseConnector):
                     WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
                       AND tc.TABLE_SCHEMA = 'dbo'
                     """
-                )
-                rows = await cur.fetchall()
+            )
+            rows = await cur.fetchall()
         return [
-            RelationshipInfo(from_table=r[0], from_column=r[1], to_table=r[2], to_column=r[3], constraint_name=r[4])
+            RelationshipInfo(
+                from_table=r[0],
+                from_column=r[1],
+                to_table=r[2],
+                to_column=r[3],
+                constraint_name=r[4],
+            )
             for r in rows
         ]
 
@@ -170,12 +181,11 @@ class MSSQLConnector(BaseConnector):
         self, sql: str, params: list[Any] | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         assert self._pool, "Not connected"
-        safe_sql = sql if "TOP" in sql.upper() or "FETCH" in sql.upper() else f"SELECT TOP {limit} * FROM ({sql}) _sub"
-        async with self._pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(safe_sql, *(params or []))
-                cols = [c[0] for c in cur.description]
-                rows = await cur.fetchall()
+        safe_sql = f"SELECT TOP {int(limit)} * FROM ({sql}) AS mcp_limited_query"
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(safe_sql, *(params or []))
+            cols = [c[0] for c in cur.description]
+            rows = await cur.fetchall()
         return [dict(zip(cols, row)) for row in rows]
 
     async def get_sample_data(self, table_name: str, limit: int = 5) -> list[dict[str, Any]]:

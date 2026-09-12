@@ -5,6 +5,7 @@ Redis is a key-value store, not a relational DB.
 Schema introspection = key pattern analysis and namespace mapping.
 Query execution = key lookups (GET, HGETALL, LRANGE, etc.)
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -23,7 +24,7 @@ from mcp_db_wrapper.core.config import ConnectionConfig
 
 logger = structlog.get_logger(__name__)
 
-_SCAN_COUNT = 200      # Keys per SCAN iteration
+_SCAN_COUNT = 200  # Keys per SCAN iteration
 _MAX_KEY_SAMPLE = 100  # Max keys to sample for pattern analysis
 
 
@@ -73,7 +74,7 @@ class RedisConnector(BaseConnector):
             key_type = await self._client.type(key)
             if key_type == "hash":
                 hdata = await self._client.hgetall(key)
-                for field, val in hdata.items():
+                for field in hdata:
                     fields[field].add("string")
             elif key_type == "string":
                 fields["value"].add("string")
@@ -86,8 +87,7 @@ class RedisConnector(BaseConnector):
                 fields["member"].add("string")
 
         columns = [
-            ColumnInfo(name=f, data_type=" | ".join(sorted(types)))
-            for f, types in fields.items()
+            ColumnInfo(name=f, data_type=" | ".join(sorted(types))) for f, types in fields.items()
         ]
 
         return TableInfo(
@@ -111,9 +111,7 @@ class RedisConnector(BaseConnector):
             "Redis does not support SQL. Use execute_redis_command() instead."
         )
 
-    async def execute_redis_command(
-        self, command: str, *args: Any
-    ) -> Any:
+    async def execute_redis_command(self, command: str, *args: Any) -> Any:
         """
         Execute a safe read-only Redis command.
 
@@ -122,9 +120,26 @@ class RedisConnector(BaseConnector):
         """
         assert self._client, "Not connected"
         ALLOWED = {
-            "GET", "HGET", "HGETALL", "LRANGE", "SMEMBERS", "ZRANGE",
-            "KEYS", "SCAN", "TYPE", "EXISTS", "TTL", "STRLEN", "SCARD",
-            "LLEN", "HKEYS", "HVALS", "HLEN", "ZSCORE", "ZRANK", "MGET",
+            "GET",
+            "HGET",
+            "HGETALL",
+            "LRANGE",
+            "SMEMBERS",
+            "ZRANGE",
+            "KEYS",
+            "SCAN",
+            "TYPE",
+            "EXISTS",
+            "TTL",
+            "STRLEN",
+            "SCARD",
+            "LLEN",
+            "HKEYS",
+            "HVALS",
+            "HLEN",
+            "ZSCORE",
+            "ZRANK",
+            "MGET",
         }
         if command.upper() not in ALLOWED:
             raise PermissionError(
@@ -173,9 +188,7 @@ class RedisConnector(BaseConnector):
         sampled = 0
 
         while sampled < _MAX_KEY_SAMPLE:
-            cursor, keys = await self._client.scan(
-                cursor=cursor, count=_SCAN_COUNT
-            )
+            cursor, keys = await self._client.scan(cursor=cursor, count=_SCAN_COUNT)
             for key in keys:
                 ns = key.split(":")[0] if ":" in key else key
                 namespaces[ns].append(key)

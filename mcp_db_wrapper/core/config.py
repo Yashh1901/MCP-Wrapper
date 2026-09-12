@@ -4,6 +4,7 @@ core/config.py — Application settings loaded from env vars and YAML configs.
 Uses pydantic-settings for type-safe, validated configuration.
 Sensitive values (passwords, keys) are NEVER logged or exposed via MCP tools.
 """
+
 from __future__ import annotations
 
 import os
@@ -13,7 +14,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load .env file early so subsequent os.getenv calls work
@@ -29,9 +30,11 @@ _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 def _interpolate_env(value: Any) -> Any:
     """Recursively replace ${ENV_VAR} placeholders in YAML values."""
     if isinstance(value, str):
+
         def _replace(m: re.Match) -> str:
             env_val = os.getenv(m.group(1), "")
             return env_val
+
         return _ENV_VAR_RE.sub(_replace, value)
     if isinstance(value, dict):
         return {k: _interpolate_env(v) for k, v in value.items()}
@@ -58,6 +61,7 @@ def _load_yaml(path: str | Path) -> dict:
 #  Settings model
 # ------------------------------------------------------------------ #
 
+
 class Settings(BaseSettings):
     """
     All application settings.
@@ -78,16 +82,19 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
-    transport: str = "both"          # stdio | http | both
+    transport: str = "both"  # stdio | http | both
     log_level: str = "INFO"
     server_name: str = "mcp-db-wrapper"
     server_version: str = "0.1.0"
 
     # Security
-    api_key: str | None = None        # HTTP transport bearer token
+    api_key: str | None = None  # HTTP transport bearer token
     enable_tls: bool = False
     tls_cert_path: str | None = None
     tls_key_path: str | None = None
+    request_timeout_seconds: int = 30
+    http_rate_limit_per_minute: int = 60
+    audit_log_path: str | None = "logs/audit.jsonl"
 
     # Config paths
     policy_path: str = "policies/policies.yaml"
@@ -109,10 +116,25 @@ class Settings(BaseSettings):
             raise ValueError(f"log_level must be one of {allowed}")
         return v.upper()
 
+    @field_validator("request_timeout_seconds")
+    @classmethod
+    def validate_timeout(cls, v: int) -> int:
+        if not 1 <= v <= 300:
+            raise ValueError("request_timeout_seconds must be between 1 and 300")
+        return v
+
+    @field_validator("http_rate_limit_per_minute")
+    @classmethod
+    def validate_rate_limit(cls, v: int) -> int:
+        if not 1 <= v <= 10_000:
+            raise ValueError("http_rate_limit_per_minute must be between 1 and 10000")
+        return v
+
 
 # ------------------------------------------------------------------ #
 #  Connection config model
 # ------------------------------------------------------------------ #
+
 
 class ConnectionConfig:
     """Parsed database connection configuration."""
@@ -162,10 +184,7 @@ def load_connections(path: str | None = None) -> dict[str, ConnectionConfig]:
         yaml_path = path or settings.connections_path
         data = _load_yaml(yaml_path)
         raw_connections: dict = data.get("connections", {})
-        _connections = {
-            name: ConnectionConfig(name, cfg)
-            for name, cfg in raw_connections.items()
-        }
+        _connections = {name: ConnectionConfig(name, cfg) for name, cfg in raw_connections.items()}
     return _connections
 
 
@@ -179,6 +198,9 @@ def load_policies(path: str | None = None) -> dict:
     Returns:
         Full parsed policy dict.
     """
-    settings = load_settings()
-    yaml_path = path or settings.policy_path
+    yaml_path = Path(path or load_settings().policy_path)
+    # Never load an example policy as a live fallback.  A missing live policy is
+    # intentionally interpreted by PolicyEngine as deny-by-default.
+    if not yaml_path.exists():
+        return {}
     return _load_yaml(yaml_path)

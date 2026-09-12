@@ -1,27 +1,28 @@
 """
 connectors/__init__.py — Connector registry and factory
 """
+
 from mcp_db_wrapper.connectors.base import BaseConnector, ColumnInfo, RelationshipInfo, TableInfo
-from mcp_db_wrapper.connectors.postgres import PostgresConnector
-from mcp_db_wrapper.connectors.mysql import MySQLConnector
 from mcp_db_wrapper.connectors.mongodb import MongoDBConnector
-from mcp_db_wrapper.connectors.sqlite import SQLiteConnector
-from mcp_db_wrapper.connectors.redis import RedisConnector
 from mcp_db_wrapper.connectors.mssql import MSSQLConnector
+from mcp_db_wrapper.connectors.mysql import MySQLConnector
+from mcp_db_wrapper.connectors.postgres import PostgresConnector
+from mcp_db_wrapper.connectors.redis import RedisConnector
+from mcp_db_wrapper.connectors.sqlite import SQLiteConnector
 from mcp_db_wrapper.connectors.supabase import SupabaseConnector
 
 __all__ = [
     "BaseConnector",
     "ColumnInfo",
-    "RelationshipInfo",
-    "TableInfo",
-    "PostgresConnector",
-    "MySQLConnector",
-    "MongoDBConnector",
-    "SQLiteConnector",
-    "RedisConnector",
     "MSSQLConnector",
+    "MongoDBConnector",
+    "MySQLConnector",
+    "PostgresConnector",
+    "RedisConnector",
+    "RelationshipInfo",
+    "SQLiteConnector",
     "SupabaseConnector",
+    "TableInfo",
 ]
 
 CONNECTOR_MAP: dict[str, type[BaseConnector]] = {
@@ -44,8 +45,5 @@ def get_connector_class(db_type: str) -> type[BaseConnector]:
     cls = CONNECTOR_MAP.get(db_type.lower())
     if cls is None:
         supported = sorted(set(CONNECTOR_MAP.keys()))
-        raise ValueError(
-            f"Unsupported database type: '{db_type}'. "
-            f"Supported types: {supported}"
-        )
+        raise ValueError(f"Unsupported database type: '{db_type}'. Supported types: {supported}")
     return cls

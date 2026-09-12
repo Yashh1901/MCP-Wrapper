@@ -9,15 +9,16 @@ Connectors handle:
   - Sample data retrieval
   - DB statistics
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any
 
-
 # ------------------------------------------------------------------ #
 #  Data models (simple dataclasses — no ORM overhead)
 # ------------------------------------------------------------------ #
+
 
 class ColumnInfo:
     """Descriptor for a single table column."""
@@ -128,6 +129,7 @@ class RelationshipInfo:
 #  Abstract Base Connector
 # ------------------------------------------------------------------ #
 
+
 class BaseConnector(ABC):
     """
     Abstract connector that all database drivers must implement.
@@ -170,11 +172,11 @@ class BaseConnector(ABC):
     def is_connected(self) -> bool:
         return self._connected
 
-    async def __aenter__(self) -> "BaseConnector":
+    async def __aenter__(self) -> BaseConnector:  # noqa: PYI034 - Python 3.10 compatibility
         await self.connect()
         return self
 
-    async def __aexit__(self, *_: Any) -> None:
+    async def __aexit__(self, *_: object) -> None:
         await self.disconnect()
 
     # -------------------------------------------------------------- #
@@ -250,9 +252,7 @@ class BaseConnector(ABC):
     #  Sample data
     # -------------------------------------------------------------- #
 
-    async def get_sample_data(
-        self, table_name: str, limit: int = 5
-    ) -> list[dict[str, Any]]:
+    async def get_sample_data(self, table_name: str, limit: int = 5) -> list[dict[str, Any]]:
         """
         Return a sample of rows from a table.
 
@@ -268,9 +268,7 @@ class BaseConnector(ABC):
         """
         # Default: execute a simple SELECT LIMIT query
         # Subclasses should override for NoSQL databases
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement get_sample_data()"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} must implement get_sample_data()")
 
     # -------------------------------------------------------------- #
     #  Statistics

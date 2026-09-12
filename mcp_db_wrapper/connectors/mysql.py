@@ -4,6 +4,7 @@ connectors/mysql.py — MySQL Connector
 Uses aiomysql for async connections.
 Introspects schema via INFORMATION_SCHEMA queries.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -55,29 +56,27 @@ class MySQLConnector(BaseConnector):
     async def list_tables(self) -> list[str]:
         assert self._pool, "Not connected"
         db = self.config.get("database", "")
-        async with self._pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
                     SELECT TABLE_NAME
                     FROM INFORMATION_SCHEMA.TABLES
                     WHERE TABLE_SCHEMA = %s
                       AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
                     ORDER BY TABLE_NAME
                     """,
-                    (db,),
-                )
-                rows = await cur.fetchall()
+                (db,),
+            )
+            rows = await cur.fetchall()
         return [r[0] for r in rows]
 
     async def describe_table(self, table_name: str) -> TableInfo:
         assert self._pool, "Not connected"
         db = self.config.get("database", "")
-        async with self._pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                # Columns
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
+            # Columns
+            await cur.execute(
+                """
                     SELECT
                         COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH,
                         IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY, EXTRA
@@ -85,13 +84,13 @@ class MySQLConnector(BaseConnector):
                     WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
                     ORDER BY ORDINAL_POSITION
                     """,
-                    (db, table_name),
-                )
-                col_rows = await cur.fetchall()
+                (db, table_name),
+            )
+            col_rows = await cur.fetchall()
 
-                # Foreign keys
-                await cur.execute(
-                    """
+            # Foreign keys
+            await cur.execute(
+                """
                     SELECT
                         COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME,
                         CONSTRAINT_NAME
@@ -99,16 +98,16 @@ class MySQLConnector(BaseConnector):
                     WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
                       AND REFERENCED_TABLE_NAME IS NOT NULL
                     """,
-                    (db, table_name),
-                )
-                fk_rows = await cur.fetchall()
+                (db, table_name),
+            )
+            fk_rows = await cur.fetchall()
 
-                # Row count estimate
-                await cur.execute(
-                    "SELECT TABLE_ROWS FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s",
-                    (db, table_name),
-                )
-                cnt = await cur.fetchone()
+            # Row count estimate
+            await cur.execute(
+                "SELECT TABLE_ROWS FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s",
+                (db, table_name),
+            )
+            cnt = await cur.fetchone()
 
         fk_map = {
             r["COLUMN_NAME"]: f"{r['REFERENCED_TABLE_NAME']}.{r['REFERENCED_COLUMN_NAME']}"
@@ -143,10 +142,9 @@ class MySQLConnector(BaseConnector):
     async def get_relationships(self) -> list[RelationshipInfo]:
         assert self._pool, "Not connected"
         db = self.config.get("database", "")
-        async with self._pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
                     SELECT
                         TABLE_NAME AS from_table,
                         COLUMN_NAME AS from_column,
@@ -157,9 +155,9 @@ class MySQLConnector(BaseConnector):
                     WHERE TABLE_SCHEMA = %s
                       AND REFERENCED_TABLE_NAME IS NOT NULL
                     """,
-                    (db,),
-                )
-                rows = await cur.fetchall()
+                (db,),
+            )
+            rows = await cur.fetchall()
 
         return [
             RelationshipInfo(
@@ -179,11 +177,10 @@ class MySQLConnector(BaseConnector):
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         assert self._pool, "Not connected"
-        safe_sql = self._inject_limit(sql, limit)
-        async with self._pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(safe_sql, params or ())
-                rows = await cur.fetchall()
+        safe_sql = f"SELECT * FROM ({sql}) AS mcp_limited_query LIMIT {int(limit)}"
+        async with self._pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(safe_sql, params or ())
+            rows = await cur.fetchall()
         return list(rows)
 
     async def get_sample_data(self, table_name: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -192,20 +189,19 @@ class MySQLConnector(BaseConnector):
     async def get_db_stats(self) -> dict[str, Any]:
         assert self._pool, "Not connected"
         db = self.config.get("database", "")
-        async with self._pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute("SELECT VERSION() AS version")
-                ver = await cur.fetchone()
-                await cur.execute(
-                    """
+        async with self._pool.acquire() as conn, conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT VERSION() AS version")
+            ver = await cur.fetchone()
+            await cur.execute(
+                """
                     SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH
                     FROM INFORMATION_SCHEMA.TABLES
                     WHERE TABLE_SCHEMA = %s
                     ORDER BY DATA_LENGTH DESC
                     """,
-                    (db,),
-                )
-                tables = await cur.fetchall()
+                (db,),
+            )
+            tables = await cur.fetchall()
         return {
             "db_type": self.DB_TYPE,
             "connection": self.name,

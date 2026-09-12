@@ -1,6 +1,7 @@
 """
 connectors/sqlite.py — SQLite Connector (async via aiosqlite)
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -52,7 +53,7 @@ class SQLiteConnector(BaseConnector):
             col_rows = await cur.fetchall()
         async with self._conn.execute(f"PRAGMA foreign_key_list('{table_name}')") as cur:
             fk_rows = await cur.fetchall()
-        async with self._conn.execute(f"SELECT COUNT(*) AS cnt FROM \"{table_name}\"") as cur:
+        async with self._conn.execute(f'SELECT COUNT(*) AS cnt FROM "{table_name}"') as cur:
             count_row = await cur.fetchone()
 
         fk_map = {r["from"]: f"{r['table']}.{r['to']}" for r in fk_rows}
@@ -102,7 +103,9 @@ class SQLiteConnector(BaseConnector):
         self, sql: str, params: list[Any] | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         assert self._conn, "Not connected"
-        safe_sql = sql if "LIMIT" in sql.upper() else f"{sql} LIMIT {limit}"
+        # Wrapping, rather than searching for LIMIT text, keeps the cap effective
+        # when a user supplies LIMIT 100000 or uses the word in a string literal.
+        safe_sql = f"SELECT * FROM ({sql}) AS mcp_limited_query LIMIT {int(limit)}"
         async with self._conn.execute(safe_sql, params or []) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]

@@ -5,6 +5,7 @@ Uses motor (async MongoDB driver).
 Schema introspection is inferred from document sampling since MongoDB
 is schema-less — we sample documents to derive field types.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict

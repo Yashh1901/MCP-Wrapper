@@ -1,17 +1,14 @@
 """
 tests/test_policy.py — Unit tests for the policy engine
 """
+
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 from mcp_db_wrapper.core.policy import PolicyEngine, PolicyViolation
-
 
 # ------------------------------------------------------------------ #
 #  Fixtures
@@ -66,6 +63,7 @@ def engine(policy_file: str) -> PolicyEngine:
 #  Tests: schema access
 # ------------------------------------------------------------------ #
 
+
 def test_schema_access_allowed(engine: PolicyEngine) -> None:
     engine.assert_schema_access("test_db")  # should not raise
 
@@ -78,6 +76,7 @@ def test_schema_access_denied(engine: PolicyEngine) -> None:
 # ------------------------------------------------------------------ #
 #  Tests: table access
 # ------------------------------------------------------------------ #
+
 
 def test_table_access_allowed(engine: PolicyEngine) -> None:
     engine.assert_table_access("test_db", "users")
@@ -96,6 +95,7 @@ def test_table_access_case_insensitive(engine: PolicyEngine) -> None:
 #  Tests: query execution
 # ------------------------------------------------------------------ #
 
+
 def test_query_execution_allowed(engine: PolicyEngine) -> None:
     engine.assert_query_execution("test_db")
 
@@ -109,22 +109,23 @@ def test_query_execution_denied(engine: PolicyEngine) -> None:
 #  Tests: filter_tables
 # ------------------------------------------------------------------ #
 
+
 def test_filter_tables_allowlist(engine: PolicyEngine) -> None:
     all_tables = ["users", "products", "orders", "admin_logs", "audit"]
     visible = engine.filter_tables("test_db", all_tables)
     assert visible == ["users", "products", "orders"]
 
 
-def test_filter_tables_unknown_connection_uses_defaults(engine: PolicyEngine) -> None:
-    # no_policy_db not in policies → uses defaults (allow all)
-    all_tables = ["table_a", "table_b"]
-    visible = engine.filter_tables("no_policy_db", all_tables)
-    assert visible == all_tables
+def test_missing_policy_file_is_denied_by_default(tmp_path: Path) -> None:
+    engine = PolicyEngine(str(tmp_path / "missing.yaml"))
+    with pytest.raises(PolicyViolation):
+        engine.assert_query_execution("no_policy_db")
 
 
 # ------------------------------------------------------------------ #
 #  Tests: column masking
 # ------------------------------------------------------------------ #
+
 
 def test_apply_column_masks(engine: PolicyEngine) -> None:
     rows = [
@@ -134,8 +135,8 @@ def test_apply_column_masks(engine: PolicyEngine) -> None:
     masked = engine.apply_column_masks("test_db", "users", rows)
     assert masked[0]["email"] == "***MASKED***"
     assert masked[0]["password_hash"] == "***MASKED***"
-    assert masked[0]["name"] == "Alice"   # non-masked
-    assert masked[0]["id"] == 1           # non-masked
+    assert masked[0]["name"] == "Alice"  # non-masked
+    assert masked[0]["id"] == 1  # non-masked
 
 
 def test_no_masks_for_unlisted_table(engine: PolicyEngine) -> None:
@@ -148,6 +149,7 @@ def test_no_masks_for_unlisted_table(engine: PolicyEngine) -> None:
 # ------------------------------------------------------------------ #
 #  Tests: row limit
 # ------------------------------------------------------------------ #
+
 
 def test_enforce_row_limit(engine: PolicyEngine) -> None:
     rows = [{"id": i} for i in range(200)]
@@ -164,6 +166,7 @@ def test_enforce_sample_row_limit(engine: PolicyEngine) -> None:
 # ------------------------------------------------------------------ #
 #  Tests: policy summary
 # ------------------------------------------------------------------ #
+
 
 def test_policy_summary(engine: PolicyEngine) -> None:
     summary = engine.get_policy_summary("test_db")

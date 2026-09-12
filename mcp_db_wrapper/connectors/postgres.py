@@ -4,6 +4,7 @@ connectors/postgres.py — PostgreSQL Connector
 Uses asyncpg for high-performance async connections.
 Provides full schema introspection via information_schema queries.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -159,10 +160,7 @@ class PostgresConnector(BaseConnector):
                 table_name,
             )
 
-        fk_map = {
-            r["column_name"]: f"{r['foreign_table']}.{r['foreign_column']}"
-            for r in fk_rows
-        }
+        fk_map = {r["column_name"]: f"{r['foreign_table']}.{r['foreign_column']}" for r in fk_rows}
 
         columns = [
             ColumnInfo(
@@ -238,18 +236,14 @@ class PostgresConnector(BaseConnector):
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         assert self._pool, "Not connected"
-        # Inject LIMIT to prevent runaway queries
-        safe_sql = self._inject_limit(sql, limit)
+        # Outer LIMIT is authoritative even if the incoming SELECT has a LIMIT.
+        safe_sql = f"SELECT * FROM ({sql}) AS mcp_limited_query LIMIT {int(limit)}"
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(safe_sql, *(params or []))
         return [dict(r) for r in rows]
 
-    async def get_sample_data(
-        self, table_name: str, limit: int = 5
-    ) -> list[dict[str, Any]]:
-        return await self.execute_query(
-            f'SELECT * FROM "{table_name}" LIMIT {limit}'
-        )
+    async def get_sample_data(self, table_name: str, limit: int = 5) -> list[dict[str, Any]]:
+        return await self.execute_query(f'SELECT * FROM "{table_name}" LIMIT {limit}')
 
     # -------------------------------------------------------------- #
     #  Statistics
@@ -258,7 +252,9 @@ class PostgresConnector(BaseConnector):
     async def get_db_stats(self) -> dict[str, Any]:
         assert self._pool, "Not connected"
         async with self._pool.acquire() as conn:
-            db_row = await conn.fetchrow("SELECT current_database() AS db_name, version() AS version")
+            db_row = await conn.fetchrow(
+                "SELECT current_database() AS db_name, version() AS version"
+            )
             size_row = await conn.fetchrow(
                 "SELECT pg_size_pretty(pg_database_size(current_database())) AS db_size"
             )

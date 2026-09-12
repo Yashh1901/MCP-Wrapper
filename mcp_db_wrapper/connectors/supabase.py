@@ -5,6 +5,7 @@ Supabase is a PostgreSQL-backed BaaS. We connect via the direct
 PostgreSQL URL for full schema introspection (bypassing the HTTP API).
 The Supabase Python client is used for auth/metadata queries.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,7 +13,6 @@ from typing import Any
 import structlog
 from supabase import AsyncClient, acreate_client
 
-from mcp_db_wrapper.connectors.base import RelationshipInfo, TableInfo
 from mcp_db_wrapper.connectors.postgres import PostgresConnector
 from mcp_db_wrapper.core.config import ConnectionConfig
 
@@ -52,11 +52,9 @@ class SupabaseConnector(PostgresConnector):
         await super().connect()  # establishes asyncpg pool
         if self._supabase_url and self._supabase_key:
             try:
-                self._supabase_client = await acreate_client(
-                    self._supabase_url, self._supabase_key
-                )
+                self._supabase_client = await acreate_client(self._supabase_url, self._supabase_key)
                 logger.info("supabase_client_connected", connection=self.name)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - optional client initialization
                 logger.warning("supabase_client_failed", error=str(e))
 
     async def disconnect(self) -> None:

@@ -6,6 +6,7 @@ connector data with policy filtering and column masking.
 
 This is the layer that the MCP tools call — not the connector directly.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -59,9 +60,7 @@ class SchemaIntrospector:
             "hidden_by_policy": hidden_count,
         }
 
-    async def describe_table(
-        self, connection_name: str, table_name: str
-    ) -> dict[str, Any]:
+    async def describe_table(self, connection_name: str, table_name: str) -> dict[str, Any]:
         """
         Describe a table with policy-applied column masking.
 
@@ -80,9 +79,7 @@ class SchemaIntrospector:
 
         # Apply column mask flags to schema description
         raw_cols = [c.to_dict() for c in table_info.columns]
-        masked_cols = self._policy.apply_schema_column_masks(
-            connection_name, table_name, raw_cols
-        )
+        masked_cols = self._policy.apply_schema_column_masks(connection_name, table_name, raw_cols)
 
         return {
             "connection": connection_name,
@@ -126,7 +123,7 @@ class SchemaIntrospector:
                     "row_count": table_info.row_count,
                     "columns": masked_cols,
                 }
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - one bad table must not hide the schema map
                 logger.warning(
                     "schema_map_table_error",
                     table=table_name,
@@ -207,14 +204,34 @@ class SchemaIntrospector:
         validator = get_query_validator()
         clean_sql = validator.validate(sql, dialect=connector.get_dialect())
 
+        # A policy must protect raw SQL just as it protects schema tools.  Do not
+        # rely on the caller-provided table_hint: it is optional and untrusted.
+        referenced_tables = validator.referenced_tables(clean_sql, dialect=connector.get_dialect())
+        if not referenced_tables:
+            raise PolicyViolation(
+                message="Queries must reference at least one configured table.",
+                connection=connection_name,
+                action="execute_query",
+            )
+        for table_name in referenced_tables:
+            self._policy.assert_table_access(connection_name, table_name)
+
         # Step 3: Execute with row limit
         row_limit = self._policy.get_row_limit(connection_name)
         rows = await connector.execute_query(clean_sql, limit=row_limit)
         rows = self._policy.enforce_row_limit(connection_name, rows)
 
-        # Step 4: Apply column masks (if table_hint is provided)
-        if table_hint:
-            rows = self._policy.apply_column_masks(connection_name, table_hint, rows)
+        # Step 4: Mask by the parsed table set.  Matching output field names are
+        # masked even for joins; callers cannot opt out by omitting table_hint.
+        masked_columns = self._policy.masked_columns(connection_name, referenced_tables)
+        if masked_columns:
+            rows = [
+                {
+                    key: "***MASKED***" if key.lower() in masked_columns else value
+                    for key, value in row.items()
+                }
+                for row in rows
+            ]
 
         return {
             "connection": connection_name,
@@ -224,9 +241,7 @@ class SchemaIntrospector:
             "rows": rows,
         }
 
-    async def get_sample_data(
-        self, connection_name: str, table_name: str
-    ) -> dict[str, Any]:
+    async def get_sample_data(self, connection_name: str, table_name: str) -> dict[str, Any]:
         """
         Return sample rows from a table with policy applied.
 

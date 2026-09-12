@@ -11,6 +11,7 @@ Usage:
     tables = await connector.list_tables()
     await registry.shutdown()
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -70,11 +71,7 @@ class ConnectorRegistry:
 
     async def shutdown(self) -> None:
         """Disconnect all active connectors."""
-        tasks = [
-            conn.disconnect()
-            for conn in self._connectors.values()
-            if conn.is_connected
-        ]
+        tasks = [conn.disconnect() for conn in self._connectors.values() if conn.is_connected]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._connectors.clear()
@@ -103,8 +100,7 @@ class ConnectorRegistry:
         if connection_name not in self._configs:
             available = sorted(self._configs.keys())
             raise KeyError(
-                f"No connection configured for '{connection_name}'. "
-                f"Available: {available}"
+                f"No connection configured for '{connection_name}'. Available: {available}"
             )
 
         async with self._lock:
@@ -132,12 +128,14 @@ class ConnectorRegistry:
         result = []
         for name, cfg in self._configs.items():
             conn = self._connectors.get(name)
-            result.append({
-                "name": name,
-                "type": cfg.type,
-                "description": cfg.description,
-                "connected": conn.is_connected if conn else False,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "type": cfg.type,
+                    "description": cfg.description,
+                    "connected": conn.is_connected if conn else False,
+                }
+            )
         return result
 
     async def health_check(self) -> dict[str, Any]:
@@ -153,7 +151,7 @@ class ConnectorRegistry:
                 # Just try listing tables as a ping
                 await conn.list_tables()
                 results[name] = {"status": "healthy", "type": conn.DB_TYPE}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - health checks must isolate failures
                 results[name] = {"status": "unhealthy", "error": str(e)}
         # Report unconfigured/unconnected ones
         for name in self._configs:

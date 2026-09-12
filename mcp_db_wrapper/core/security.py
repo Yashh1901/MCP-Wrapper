@@ -7,11 +7,11 @@ Provides:
   - API key validation for HTTP transport
   - TLS context builder
 """
+
 from __future__ import annotations
 
 import re
 import ssl
-from typing import Any
 
 import sqlglot
 import sqlglot.expressions as exp
@@ -27,18 +27,16 @@ logger = structlog.get_logger(__name__)
 _DANGEROUS_PATTERNS = re.compile(
     r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|EXEC|EXECUTE"
     r"|GRANT|REVOKE|CALL|MERGE|REPLACE|LOAD|OUTFILE|DUMPFILE"
-    r"|INTO\s+OUTFILE|INTO\s+DUMPFILE|INFORMATION_SCHEMA\.COLUMNS"
+    r"|INTO\s+OUTFILE|INTO\s+DUMPFILE"
     r"|SYS\.|MYSQL\.|PG_SLEEP|WAITFOR|BENCHMARK|SLEEP)\b",
     re.IGNORECASE,
 )
-
-# Comment patterns used in SQL injection
-_SQL_COMMENT_PATTERNS = re.compile(r"(--|#|/\*|\*/|;)", re.IGNORECASE)
 
 
 # ------------------------------------------------------------------ #
 #  Exceptions
 # ------------------------------------------------------------------ #
+
 
 class QuerySecurityError(Exception):
     """Raised when a query fails security validation."""
@@ -47,6 +45,7 @@ class QuerySecurityError(Exception):
 # ------------------------------------------------------------------ #
 #  Query validator
 # ------------------------------------------------------------------ #
+
 
 class QueryValidator:
     """
@@ -75,14 +74,7 @@ class QueryValidator:
         if not sql or not sql.strip():
             raise QuerySecurityError("Empty query is not allowed.")
 
-        cleaned = sql.strip().rstrip(";")
-
-        # Step 1: Regex-based pre-check for dangerous keywords
-        if _DANGEROUS_PATTERNS.search(cleaned):
-            raise QuerySecurityError(
-                "Query contains disallowed SQL keywords. "
-                "Only SELECT statements are permitted."
-            )
+        cleaned = sql.strip().rstrip(";").strip()
 
         # Step 2: AST-based validation via sqlglot
         try:
@@ -95,8 +87,7 @@ class QueryValidator:
 
         if len(statements) > 1:
             raise QuerySecurityError(
-                "Multiple statements are not allowed. "
-                "Submit one SELECT statement at a time."
+                "Multiple statements are not allowed. Submit one SELECT statement at a time."
             )
 
         stmt = statements[0]
@@ -105,17 +96,35 @@ class QueryValidator:
                 f"Only SELECT statements are allowed. Got: {type(stmt).__name__}."
             )
 
-        # Step 3: Check for subquery-based injection patterns
+        # Step 3: Check the complete AST.  This is deliberately AST based rather
+        # than a keyword blacklist: words such as "drop" are valid string values.
         self._check_subqueries(stmt)
 
         logger.debug("query_validated", sql=cleaned[:200])
         return cleaned
 
+    def referenced_tables(self, sql: str, dialect: str | None = None) -> set[str]:
+        """Return physical tables referenced by an already-valid SELECT.
+
+        CTE names are excluded.  The caller uses this to enforce table policy on
+        every table in a query, including joins and nested subqueries.
+        """
+        statement = sqlglot.parse_one(sql, dialect=dialect)
+        cte_names = {
+            cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE) if cte.alias_or_name
+        }
+        return {
+            table.name.lower()
+            for table in statement.find_all(exp.Table)
+            if table.name and table.name.lower() not in cte_names
+        }
+
     def _check_subqueries(self, stmt: exp.Expression) -> None:
         """Check that subqueries don't contain write operations."""
         for node in stmt.walk():
-            if isinstance(node, (exp.Insert, exp.Update, exp.Delete, exp.Drop,
-                                  exp.Create, exp.Command)):
+            if isinstance(
+                node, (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Command)
+            ):
                 raise QuerySecurityError(
                     f"Subquery contains disallowed operation: {type(node).__name__}"
                 )
@@ -124,6 +133,7 @@ class QueryValidator:
 # ------------------------------------------------------------------ #
 #  API Key validation
 # ------------------------------------------------------------------ #
+
 
 def validate_api_key(provided_key: str | None, expected_key: str | None) -> bool:
     """
@@ -146,6 +156,7 @@ def validate_api_key(provided_key: str | None, expected_key: str | None) -> bool
 
     # Use hmac.compare_digest for timing-safe comparison
     import hmac
+
     return hmac.compare_digest(
         provided_key.encode("utf-8"),
         expected_key.encode("utf-8"),
@@ -155,6 +166,7 @@ def validate_api_key(provided_key: str | None, expected_key: str | None) -> bool
 # ------------------------------------------------------------------ #
 #  TLS context builder
 # ------------------------------------------------------------------ #
+
 
 def build_ssl_context(cert_path: str, key_path: str) -> ssl.SSLContext:
     """
