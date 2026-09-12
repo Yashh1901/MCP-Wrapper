@@ -24,6 +24,7 @@ import json
 from typing import Any
 
 import structlog
+from mcp import types
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
@@ -95,32 +96,34 @@ async def create_server() -> Server:
     _introspector = SchemaIntrospector(_registry, _policy)
     _audit = AuditLogger(settings.audit_log_path)
 
-    server = Server(
-        name=settings.server_name,
-        version=settings.server_version,
-    )
+    async def _list_tools(
+        _context: Any, _params: types.PaginatedRequestParams | None
+    ) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=_get_tool_definitions())
 
-    # ----------------------------------------------------------------
-    #  Tool: list_connections
-    # ----------------------------------------------------------------
-    @server.list_tools()
-    async def _list_tools() -> list[Tool]:
-        return _get_tool_definitions()
-
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def _call_tool(
+        _context: Any, params: types.CallToolRequestParams
+    ) -> types.CallToolResult:
+        arguments = params.arguments or {}
         connection = arguments.get("connection")
         try:
             response = await asyncio.wait_for(
-                _dispatch_tool(name, arguments), timeout=settings.request_timeout_seconds
+                _dispatch_tool(params.name, arguments), timeout=settings.request_timeout_seconds
             )
             outcome = "error" if '"error"' in response[0].text else "success"
         except TimeoutError:
-            response = _err(f"Error executing '{name}': request timed out")
+            response = _err(f"Error executing '{params.name}': request timed out")
             outcome = "timeout"
         if _audit:
-            _audit.record(tool=name, connection=connection, outcome=outcome)
-        return response
+            _audit.record(tool=params.name, connection=connection, outcome=outcome)
+        return types.CallToolResult(content=response, isError=outcome != "success")
+
+    server = Server(
+        name=settings.server_name,
+        version=settings.server_version,
+        on_list_tools=_list_tools,
+        on_call_tool=_call_tool,
+    )
 
     logger.info(
         "mcp_server_created",
